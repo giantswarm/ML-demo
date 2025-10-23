@@ -1,0 +1,81 @@
+# ------------------------------------------------------------
+# 1. Secret: stores Mimir basic auth credentials
+# ------------------------------------------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mimir-auth
+  namespace: ml-workloads
+type: Opaque
+stringData:
+  username: ai-tests
+  password: ai-tests
+
+---
+# ------------------------------------------------------------
+# 2. TriggerAuthentication: tells KEDA how to use the secret
+# ------------------------------------------------------------
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: mimir-auth-trigger
+  namespace: ml-workloads
+spec:
+  secretTargetRef:
+    - parameter: username
+      name: mimir-auth
+      key: username
+    - parameter: password
+      name: mimir-auth
+      key: password
+
+---
+# ------------------------------------------------------------
+# 3. ScaledObject: defines scaling behavior using Mimir metrics
+# ------------------------------------------------------------
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ml-demo
+  namespace: ml-workloads
+spec:
+  scaleTargetRef:
+    name: ml-demo
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  pollingInterval: 30
+  cooldownPeriod: 300
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 15
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 15
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: https://ai-mimir.golem.gaws.gigantic.io/prometheus
+        query: avg(DCGM_FI_DEV_GPU_UTIL{namespace!="",pod!=""}) by (pod)
+        threshold: "70"
+        authModes: "basic"
+        unsafeSsl: "false"
+      authenticationRef:
+        name: mimir-auth-trigger
+    - type: prometheus
+      metadata:
+        serverAddress: https://ai-mimir.golem.gaws.gigantic.io/prometheus
+        query: avg(DCGM_FI_DEV_MEM_COPY_UTIL{namespace!="",pod!=""}) by (pod)
+        threshold: "80"
+        authModes: "basic"
+        unsafeSsl: "false"
+      authenticationRef:
+        name: mimir-auth-trigger
